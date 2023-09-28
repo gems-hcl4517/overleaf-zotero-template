@@ -1,30 +1,6 @@
-import os
-import bibtexparser
+import os, argparse, bibtexparser
 
-with open(
-    os.path.join(os.path.dirname(__file__), 'zotero.bib')
-) as infile:
-    bibdb = bibtexparser.load(infile)
-    
-with open(
-    os.path.join(os.path.dirname(__file__), 'mendeley.bib')
-) as infile:
-    bibdb2 = bibtexparser.load(infile)
-    
-with open(
-    os.path.join(os.path.dirname(__file__), 'clean_ref_cache.bib')
-) as infile2:
-    cachebibdb = bibtexparser.load(infile2)
-
-    
-entry_id_delete = []
-cache_id = {entry.get('ID', '') for entry in cachebibdb.entries}
-seen_id = set()
-logged_refs = set()
-
-print(cache_id)
-    
-def clean_entries(entries): 
+def clean_entries(entries, delete_set, doi_set, id_set, cache_id_set): 
     for entry in entries:
         if 'abstract' in entry:
             del entry['abstract']
@@ -34,9 +10,10 @@ def clean_entries(entries):
 
         if 'language' in entry:
             del entry['language']
-            
+
         try:
-            author = entry.get('author', '').split(',')[0].lower() or entry.get('editor', '').split(',')[0].lower()
+            entry['author'] = entry.get('author', '') or entry.get('editor', '')
+            author = entry.get('author', '').split(',')[0].lower()
             author = author.split()[-1]
             year = entry.get('year', '').split()[-1]
             doi = entry.get('doi', '')
@@ -44,48 +21,86 @@ def clean_entries(entries):
             i = 1
             bib_id = f"{author}{year[-2:]}"
             alt_bib_id = bib_id
-            while alt_bib_id in seen_id or alt_bib_id in cache_id:
+            while alt_bib_id in id_set or alt_bib_id in cache_id_set:
                 alt_bib_id = f"{author}{year[-2:]}{chr(ord('a') + i)}"
                 i += 1
 
-            if bib_id in seen_id and doi in logged_refs:
-                entry_id_delete.append(entry['ID'])
-            elif bib_id in seen_id and doi not in logged_refs:
+            if bib_id in id_set and doi in doi_set:
+                delete_set.add(entry['ID'])
+            elif bib_id in id_set and doi not in doi_set:
                 entry['ID'] = alt_bib_id
             else:
                 entry['ID'] = bib_id
-                
-            if entry['ID'] in cache_id:
-                entry_id_delete.append(entry['ID'])
+
+            if entry['ID'] in cache_id_set:
+                delete_set.add(entry['ID'])
 
         except:
-            entry_id_delete.append(entry['ID'])
+            delete_set.add(entry['ID'])
             continue
 
-        seen_id.add(entry['ID'])
-        logged_refs.add(doi)
+        id_set.add(entry['ID'])
+        doi_set.add(doi)
         
+    return None
 
-clean_entries(bibdb.entries)
-clean_entries(bibdb2.entries)
-        
-entry_sorted = sorted([entry for entry in bibdb.entries 
-                     if not entry.get('ID') in entry_id_delete] + 
-                      [entry for entry in bibdb2.entries 
-                     if not entry.get('ID') in entry_id_delete] +
-                      [entry for entry in cachebibdb.entries], 
-                    key=lambda x: x['ID'])
 
-bibdb_sorted = bibtexparser.bibdatabase.BibDatabase()
-bibdb_sorted.entries = entry_sorted
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-z', '--zoterobib', type=str, help='Name of Zotero BibTex file', default='zotero.bib')
+    parser.add_argument('-m', '--mendeleybib', type=str, help='Name of Mendeley BibTex file', default='mendeley.bib')
+    parser.add_argument('-d', '--debug', type=bool, help='Activate Debug Mode', default=False)
+    args = parser.parse_args()
 
-with open(
-    os.path.join(os.path.dirname(__file__), 'clean_ref.bib'), 'w'
-) as outfile:
-    bibtexparser.dump(bibdb_sorted, outfile)
+    zotero_ref_path = os.path.join(os.path.dirname(__file__), args.zoterobib)
+    mendeley_ref_path = os.path.join(os.path.dirname(__file__), args.mendeleybib)
+    cache_path = os.path.join(os.path.dirname(__file__), 'clean_ref_cache.bib')
 
-# Comment out for debug
-with open(
-    os.path.join(os.path.dirname(__file__), 'clean_ref_cache.bib'), 'w'
-) as outfile2:
-    bibtexparser.dump(bibdb_sorted, outfile2)
+    if os.path.exists(zotero_ref_path):
+        with open(zotero_ref_path) as infile:
+            bibdb = bibtexparser.load(infile)
+    else:
+        bibdb = bibtexparser.bibdatabase.BibDatabase()
+
+    if os.path.exists(mendeley_ref_path):
+        with open(mendeley_ref_path) as infile2:
+            bibdb2 = bibtexparser.load(infile2)
+    else:
+        bibdb2 = bibtexparser.bibdatabase.BibDatabase()
+
+    if not os.path.exists(cache_path):
+        with open(cache_path, 'w') as infile3:
+            pass
+    with open(cache_path) as infile3:
+        cachebibdb = bibtexparser.load(infile3)
+
+    entry_id_delete = set()
+    cache_id = {entry.get('ID', '') for entry in cachebibdb.entries}
+    seen_id = set()
+    logged_refs = set()
+
+    clean_entries(bibdb.entries, entry_id_delete, logged_refs, seen_id, cache_id)
+    clean_entries(bibdb2.entries, entry_id_delete, logged_refs, seen_id, cache_id)
+
+    entry_sorted = sorted([entry for entry in bibdb.entries 
+                         if not entry.get('ID') in entry_id_delete] + 
+                          [entry for entry in bibdb2.entries 
+                         if not entry.get('ID') in entry_id_delete] +
+                          [entry for entry in cachebibdb.entries], 
+                        key=lambda x: x['ID'])
+
+    bibdb_sorted = bibtexparser.bibdatabase.BibDatabase()
+    bibdb_sorted.entries = entry_sorted
+
+    with open(
+        os.path.join(os.path.dirname(__file__), 'clean_ref.bib'), 'w'
+    ) as outfile:
+        bibtexparser.dump(bibdb_sorted, outfile)
+
+    if not args.debug:
+        with open(cache_path, 'w') as outfile2:
+            bibtexparser.dump(bibdb_sorted, outfile2)
+    
+    
+if __name__ == "__main__":
+    main()
