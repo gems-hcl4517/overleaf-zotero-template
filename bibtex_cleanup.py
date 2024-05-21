@@ -21,7 +21,7 @@ def clean_entries(entries, delete_set, doi_set, id_set, cache_id_set):
             i = 1
             bib_id = f"{author}{year[-2:]}"
             alt_bib_id = bib_id
-            while alt_bib_id in id_set or alt_bib_id in cache_id_set:
+            while alt_bib_id in id_set:
                 alt_bib_id = f"{author}{year[-2:]}{chr(ord('a') + i)}"
                 i += 1
 
